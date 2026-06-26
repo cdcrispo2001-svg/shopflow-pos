@@ -17,7 +17,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["icon.svg", "apple-touch-icon.png"],
+      includeAssets: ["icon.svg", "icon-maskable.svg"],
       manifest: {
         name: "ShopFlow POS",
         short_name: "ShopFlow",
