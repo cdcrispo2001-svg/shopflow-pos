@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+*.local
+
+# Capacitor / Android build artifacts (the android/ source itself IS committed)
+android/.gradle/
+android/app/build/
+android/build/
+android/captures/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+*.log
