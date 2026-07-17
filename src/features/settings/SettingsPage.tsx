@@ -39,9 +39,13 @@ export function SettingsPage() {
   };
 
   async function save() {
-    await saveSettings(draft);
-    setDirty(false);
-    toast("Settings saved.", "success");
+    try {
+      await saveSettings(draft);
+      setDirty(false);
+      toast("Settings saved.", "success");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Settings could not be saved.", "error");
+    }
   }
 
   async function pair() {
@@ -269,10 +273,14 @@ export function SettingsPage() {
                 </label>
               </div>
               <button className="btn btn-ghost btn-block mt-8" onClick={async () => {
-                await saveSettings(draft);
-                setDirty(false);
-                const r = await runAutoBackup({ ...draft });
-                toast(r.savedTo ? `Backed up now (${r.products} products, ${r.sales} sales).` : "Backup run.", "success");
+                try {
+                  await saveSettings(draft);
+                  setDirty(false);
+                  const r = await runAutoBackup({ ...draft });
+                  toast(r.savedTo ? `Backed up now (${r.products} products, ${r.sales} sales).` : "Backup shared.", "success");
+                } catch (error) {
+                  toast(error instanceof Error ? error.message : "Backup failed.", "error");
+                }
               }}>
                 <IconBackup /> Run a backup now
               </button>

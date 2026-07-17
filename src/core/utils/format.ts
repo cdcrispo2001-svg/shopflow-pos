@@ -24,11 +24,6 @@ export function newId(prefix = ""): string {
   return `${prefix}${time}${rand}`;
 }
 
-/** Builds a human-friendly receipt number from a running count. */
-export function receiptNumber(count: number): string {
-  return `R-${String(count + 1).padStart(6, "0")}`;
-}
-
 export function roundMoney(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }

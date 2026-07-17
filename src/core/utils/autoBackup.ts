@@ -43,6 +43,9 @@ export interface AutoBackupResult {
 
 /** Runs a backup now per the configured destinations and records the time. */
 export async function runAutoBackup(s: ShopSettings): Promise<AutoBackupResult> {
+  if (!s.autoBackupToDevice && !s.autoBackupEmail) {
+    throw new Error("Choose at least one automatic backup destination.");
+  }
   const bundle = await buildBackup();
   const ts = stamp();
   const json: BackupFile = {
@@ -60,9 +63,16 @@ export async function runAutoBackup(s: ShopSettings): Promise<AutoBackupResult> 
     products: bundle.products.length,
     sales: bundle.sales.length,
   };
+  const failures: string[] = [];
+  let succeeded = false;
 
   if (s.autoBackupToDevice) {
-    result.savedTo = await saveBackupToDevice(json);
+    try {
+      result.savedTo = await saveBackupToDevice(json);
+      succeeded = true;
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : "device save failed");
+    }
   }
 
   if (s.autoBackupEmail) {
@@ -74,10 +84,19 @@ export async function runAutoBackup(s: ShopSettings): Promise<AutoBackupResult> 
       `${new Date().toLocaleString()}\n` +
       `Products: ${bundle.products.length} · Sales: ${bundle.sales.length}\n` +
       `Revenue to date: ${formatMoney(revenue, s.currencySymbol)}`;
-    result.shared = await shareBackupFiles([json, csv], `ShopFlow backup — ${s.name}`, summary)
-      .catch(() => false);
+    try {
+      result.shared = await shareBackupFiles([json, csv], `ShopFlow backup — ${s.name}`, summary);
+      succeeded ||= result.shared;
+      if (!result.shared) failures.push("sharing is unavailable on this device");
+    } catch (error) {
+      result.shared = false;
+      failures.push(error instanceof Error ? error.message : "sharing failed");
+    }
   }
 
+  if (!succeeded) {
+    throw new Error(`Automatic backup failed: ${failures.join("; ")}.`);
+  }
   await db.settings.update("shop", { lastBackupAt: Date.now() });
   ranThisSession = true;
   return result;

@@ -23,6 +23,22 @@ export interface Totals {
   itemCount: number;
 }
 
+function assertValidLine({ product, qty }: CartLine): void {
+  if (!product.id) throw new Error("Cart item must reference a product.");
+  if (!Number.isSafeInteger(qty) || qty <= 0) {
+    throw new Error(`Quantity for ${product.name || "cart item"} must be a positive whole number.`);
+  }
+  if (!Number.isFinite(product.price) || product.price <= 0) {
+    throw new Error(`Price for ${product.name || "cart item"} is invalid.`);
+  }
+  if (!Number.isFinite(product.cost) || product.cost < 0) {
+    throw new Error(`Cost for ${product.name || "cart item"} is invalid.`);
+  }
+  if (!Number.isFinite(product.taxRate) || product.taxRate < 0 || product.taxRate > 100) {
+    throw new Error(`Tax rate for ${product.name || "cart item"} is invalid.`);
+  }
+}
+
 /**
  * Core order-calculation logic. Handles both tax-inclusive and tax-exclusive
  * pricing so receipts and reports stay consistent. Pure & unit-testable.
@@ -32,12 +48,15 @@ export function computeTotals(
   discount: number,
   settings: Pick<ShopSettings, "taxInclusive">,
 ): Totals {
+  if (!Number.isFinite(discount)) throw new Error("Discount must be a finite number.");
   let subtotal = 0;
   let taxTotal = 0;
   let costTotal = 0;
   let itemCount = 0;
 
-  for (const { product, qty } of lines) {
+  for (const line of lines) {
+    assertValidLine(line);
+    const { product, qty } = line;
     itemCount += qty;
     costTotal += product.cost * qty;
     const lineGross = product.price * qty;
@@ -71,6 +90,7 @@ export function computeTotals(
 }
 
 export function cartLineToSaleItem(line: CartLine): SaleItem {
+  assertValidLine(line);
   return {
     productId: line.product.id,
     name: line.product.name,

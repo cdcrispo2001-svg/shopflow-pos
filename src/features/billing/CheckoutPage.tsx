@@ -43,11 +43,15 @@ export function CheckoutPage() {
 
   async function onScan(code: string) {
     const p = await productRepo.findByBarcode(code);
-    if (p) {
+    if (!p) {
+      toast(`No product with barcode ${code}. Add it in Products.`, "error");
+    } else if (!p.active) {
+      toast(`${p.name} is inactive.`, "error");
+    } else if (p.stock <= 0) {
+      toast(`${p.name} is out of stock.`, "error");
+    } else {
       addProduct(p);
       toast(`Added ${p.name}`, "success");
-    } else {
-      toast(`No product with barcode ${code}. Add it in Products.`, "error");
     }
   }
 

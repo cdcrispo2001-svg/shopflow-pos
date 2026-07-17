@@ -14,6 +14,20 @@ export function useSettings(): ShopSettings {
 }
 
 export async function saveSettings(patch: Partial<ShopSettings>): Promise<void> {
+  if (patch.defaultTaxRate !== undefined && (
+    !Number.isFinite(patch.defaultTaxRate)
+    || patch.defaultTaxRate < 0
+    || patch.defaultTaxRate > 100
+  )) {
+    throw new Error("Default tax rate must be between 0 and 100.");
+  }
+  if (patch.backupReminderDays !== undefined && (
+    !Number.isSafeInteger(patch.backupReminderDays)
+    || patch.backupReminderDays < 0
+    || patch.backupReminderDays > 3_650
+  )) {
+    throw new Error("Backup reminder days must be a whole number between 0 and 3650.");
+  }
   await ensureSettings();
   await db.settings.update("shop", patch);
 }

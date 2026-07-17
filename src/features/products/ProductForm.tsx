@@ -50,7 +50,21 @@ export function ProductForm({ open, onClose, editing, defaultTaxRate, prefillBar
 
   async function save() {
     if (!form.name.trim()) return toast("Product name is required.", "error");
-    if (form.price <= 0) return toast("Selling price must be greater than 0.", "error");
+    if (!Number.isFinite(form.price) || form.price <= 0) {
+      return toast("Selling price must be a finite number greater than 0.", "error");
+    }
+    if (!Number.isFinite(form.cost) || form.cost < 0) {
+      return toast("Cost price must be a finite nonnegative number.", "error");
+    }
+    if (!Number.isSafeInteger(form.stock) || form.stock < 0) {
+      return toast("Stock must be a nonnegative whole number.", "error");
+    }
+    if (!Number.isSafeInteger(form.lowStockAt) || form.lowStockAt < 0) {
+      return toast("Low-stock threshold must be a nonnegative whole number.", "error");
+    }
+    if (!Number.isFinite(form.taxRate) || form.taxRate < 0 || form.taxRate > 100) {
+      return toast("Tax rate must be between 0 and 100.", "error");
+    }
 
     const res = editing
       ? await productRepo.update(editing.id, form)
