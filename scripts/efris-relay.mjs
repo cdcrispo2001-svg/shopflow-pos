@@ -4,7 +4,7 @@
 // unchanged. It never decrypts, logs or stores request contents.
 // The Android app does not need it.
 //
-//   ALLOWED_ORIGIN=https://crispookalia.github.io PORT=8787 node scripts/efris-relay.mjs
+//   ALLOWED_ORIGIN=https://cdcrispo2001-svg.github.io PORT=8787 node scripts/efris-relay.mjs
 //
 // Put it behind HTTPS, then set Settings → URA EFRIS → relay address to its URL.
 import { createServer } from "node:http";
@@ -18,7 +18,7 @@ const ALLOWED = (process.env.ALLOWED_ORIGIN ?? "").split(",").map((origin) => or
 const MAX_BODY = 2_000_000;
 
 if (ALLOWED.length === 0) {
-  console.error("Set ALLOWED_ORIGIN to the web app's address, e.g. ALLOWED_ORIGIN=https://crispookalia.github.io");
+  console.error("Set ALLOWED_ORIGIN to the web app's address, e.g. ALLOWED_ORIGIN=https://cdcrispo2001-svg.github.io");
   process.exit(1);
 }
 

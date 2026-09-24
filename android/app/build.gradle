@@ -16,10 +16,27 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Permanent release key, supplied by CI secrets (see .github/workflows/android.yml).
+    // Every published APK must be signed with it, or installed copies cannot update.
+    def releaseKeystore = System.getenv("SHOPFLOW_KEYSTORE")
+    signingConfigs {
+        release {
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storeType "pkcs12"
+                storePassword System.getenv("SHOPFLOW_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("SHOPFLOW_KEY_ALIAS")
+                keyPassword System.getenv("SHOPFLOW_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releaseKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

@@ -15,6 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # publish the APK to the "latest" release (push to main only)
+    env:
+      # Secrets cannot be used in `if:` directly, so expose whether the key exists.
+      HAS_SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,31 +53,56 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
 
-      - name: Build debug APK
+      # Signed with the permanent key so each new APK installs over the last.
+      # The key comes from repository secrets and only exists for this step.
+      - name: Build signed release APK
+        if: env.HAS_SIGNING_KEY == 'true'
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SHOPFLOW_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SHOPFLOW_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SHOPFLOW_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export SHOPFLOW_KEYSTORE="$RUNNER_TEMP/shopflow-release.p12"
+          printf '%s' "$SIGNING_KEY_BASE64" | base64 -d > "$SHOPFLOW_KEYSTORE"
+          ./gradlew assembleRelease --no-daemon
+          rm -f "$SHOPFLOW_KEYSTORE"
+          cp app/build/outputs/apk/release/app-release.apk ../shopflow-pos.apk
 
-      - name: Rename APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk shopflow-pos.apk
+      # Pull requests from forks get no secrets: build a debug APK just to check it compiles.
+      - name: Build debug APK (no signing key)
+        if: env.HAS_SIGNING_KEY != 'true'
+        working-directory: android
+        run: |
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../shopflow-pos.apk
 
-      - name: Upload debug APK artifact
+      - name: Show APK signing certificate
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner" verify --print-certs shopflow-pos.apk | grep -E "Signer #1 certificate (DN|SHA-256)"
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shopflow-pos-debug-apk
+          name: shopflow-pos-apk
           path: shopflow-pos.apk
 
       # Keeps the public download link working:
-      # https://github.com/Crispookalia/shopflow-pos/releases/download/latest/shopflow-pos.apk
+      # https://github.com/cdcrispo2001-svg/shopflow-pos/releases/download/latest/shopflow-pos.apk
+      # Only permanently signed builds are published, so installed copies can always update.
       - name: Publish APK to "latest" release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.HAS_SIGNING_KEY == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: ShopFlow POS — latest APK
           body: |
-            Latest debug build of the ShopFlow POS Android app.
+            Latest ShopFlow POS for Android, signed with the permanent ShopFlow key
+            (certificate SHA-256 83:45:CE:9A:AB:24:A1:8E:0F:7E:96:C0:F0:A6:5E:89:E6:5B:9C:9D:F8:E2:99:7A:EF:58:48:A2:16:75:F2:A6).
 
             **Install:** download `shopflow-pos.apk`, open it on your Android
             phone, and allow installation from this source when prompted.
-            (Debug build — unsigned for the Play Store; fine for direct install.)
+            Newer versions install over older ones and keep your data.
           files: shopflow-pos.apk
