@@ -9,13 +9,17 @@ interface CartState {
   discount: number;
   customerName: string;
   customerPhone: string;
-  addProduct: (product: Product, qty?: number) => void;
+  /** Returns false (and leaves the cart unchanged) when stock would run out. */
+  addProduct: (product: Product, qty?: number) => boolean;
   setQty: (productId: string, qty: number) => void;
-  increment: (productId: string) => void;
+  increment: (productId: string) => boolean;
   decrement: (productId: string) => void;
   removeLine: (productId: string) => void;
   setDiscount: (amount: number) => void;
-  setCustomer: (name: string, phone: string) => void;
+  customerTin: string;
+  setCustomerName: (name: string) => void;
+  setCustomerPhone: (phone: string) => void;
+  setCustomerTin: (tin: string) => void;
   clear: () => void;
 }
 
@@ -27,27 +31,34 @@ function toLineProduct(p: Product): CartLine["product"] {
     price: p.price,
     cost: p.cost,
     taxRate: p.taxRate,
+    stock: p.stock,
   };
 }
 
-export const useCart = create<CartState>((set) => ({
+export const useCart = create<CartState>((set, get) => ({
   lines: [],
   discount: 0,
   customerName: "",
   customerPhone: "",
+  customerTin: "",
 
-  addProduct: (product, qty = 1) =>
+  addProduct: (product, qty = 1) => {
+    const existing = get().lines.find((l) => l.product.id === product.id);
+    if ((existing?.qty ?? 0) + qty > product.stock) return false;
     set((state) => {
-      const existing = state.lines.find((l) => l.product.id === product.id);
       if (existing) {
         return {
           lines: state.lines.map((l) =>
-            l.product.id === product.id ? { ...l, qty: l.qty + qty } : l,
+            l.product.id === product.id
+              ? { product: toLineProduct(product), qty: l.qty + qty }
+              : l,
           ),
         };
       }
       return { lines: [...state.lines, { product: toLineProduct(product), qty }] };
-    }),
+    });
+    return true;
+  },
 
   setQty: (productId, qty) =>
     set((state) => ({
@@ -56,12 +67,17 @@ export const useCart = create<CartState>((set) => ({
         .filter((l) => l.qty > 0),
     })),
 
-  increment: (productId) =>
+  increment: (productId) => {
+    const line = get().lines.find((l) => l.product.id === productId);
+    if (!line) return false;
+    if (line.product.stock !== undefined && line.qty + 1 > line.product.stock) return false;
     set((state) => ({
       lines: state.lines.map((l) =>
         l.product.id === productId ? { ...l, qty: l.qty + 1 } : l,
       ),
-    })),
+    }));
+    return true;
+  },
 
   decrement: (productId) =>
     set((state) => ({
@@ -75,7 +91,11 @@ export const useCart = create<CartState>((set) => ({
 
   setDiscount: (amount) => set({ discount: Math.max(0, amount || 0) }),
 
-  setCustomer: (customerName, customerPhone) => set({ customerName, customerPhone }),
+  setCustomerName: (customerName) => set({ customerName }),
 
-  clear: () => set({ lines: [], discount: 0, customerName: "", customerPhone: "" }),
+  setCustomerPhone: (customerPhone) => set({ customerPhone }),
+
+  setCustomerTin: (customerTin) => set({ customerTin: customerTin.replace(/\D/g, "").slice(0, 10) }),
+
+  clear: () => set({ lines: [], discount: 0, customerName: "", customerPhone: "", customerTin: "" }),
 }));

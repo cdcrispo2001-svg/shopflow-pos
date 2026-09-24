@@ -55,6 +55,22 @@ export async function saveBackupToDevice(file: BackupFile): Promise<string> {
   return "Downloads";
 }
 
+/**
+ * Shares plain text (e.g. a receipt to WhatsApp/SMS) via the OS share sheet.
+ * Returns false when no share sheet is available on this platform.
+ */
+export async function shareText(title: string, text: string): Promise<boolean> {
+  if (isNative()) {
+    await Share.share({ title, text, dialogTitle: title });
+    return true;
+  }
+  if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+    await navigator.share({ title, text });
+    return true;
+  }
+  return false;
+}
+
 /** True when the running platform can present a native/Web share sheet. */
 export function canShare(): boolean {
   if (isNative()) return true;

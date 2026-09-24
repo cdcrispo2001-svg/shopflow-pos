@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/core/db/database";
-import type { Sale } from "@/core/types/models";
+import type { Product } from "@/core/types/models";
+import { ProductImage } from "@/core/components/ProductImage";
 import { Topbar } from "@/core/components/AppShell";
 import { Sheet } from "@/core/components/Sheet";
 import { BarcodeScanner } from "@/core/components/BarcodeScanner";
@@ -25,21 +26,37 @@ export function CheckoutPage() {
   const addProduct = useCart((s) => s.addProduct);
 
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [cartOpen, setCartOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-  const [receipt, setReceipt] = useState<Sale | null>(null);
+  const [receiptId, setReceiptId] = useState<string | null>(null);
+  // Read live so the URA fiscal number shows as soon as it arrives.
+  const receipt = useLiveQuery(() => (receiptId ? db.sales.get(receiptId) : undefined), [receiptId]) ?? null;
 
   const totals = useMemo(() => computeTotals(lines, discount, settings), [lines, discount, settings]);
 
+  const categories = useMemo(() => {
+    const names = products.filter((p) => p.active && p.category?.trim()).map((p) => p.category!.trim());
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const active = products.filter((p) => p.active);
+    const active = products.filter(
+      (p) => p.active && (!category || p.category?.trim() === category),
+    );
     if (!q) return active;
     return active.filter(
       (p) => p.name.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q) || p.barcode?.includes(q),
     );
-  }, [products, query]);
+  }, [products, query, category]);
+
+  function add(p: Product): boolean {
+    if (addProduct(p)) return true;
+    toast(`Only ${p.stock} ${p.name} in stock.`, "error");
+    return false;
+  }
 
   async function onScan(code: string) {
     const p = await productRepo.findByBarcode(code);
@@ -49,8 +66,7 @@ export function CheckoutPage() {
       toast(`${p.name} is inactive.`, "error");
     } else if (p.stock <= 0) {
       toast(`${p.name} is out of stock.`, "error");
-    } else {
-      addProduct(p);
+    } else if (add(p)) {
       toast(`Added ${p.name}`, "success");
     }
   }
@@ -73,17 +89,29 @@ export function CheckoutPage() {
             value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
 
+        {categories.length > 1 && (
+          <div className="chip-row">
+            <button className={`btn btn-sm ${category === null ? "btn-primary" : "btn-ghost"}`}
+              onClick={() => setCategory(null)}>All</button>
+            {categories.map((c) => (
+              <button key={c} className={`btn btn-sm ${category === c ? "btn-primary" : "btn-ghost"}`}
+                onClick={() => setCategory(category === c ? null : c)}>{c}</button>
+            ))}
+          </div>
+        )}
+
         {products.length === 0 ? (
           <div className="empty">
             <IconBox />
             <p>No products yet. Add products first, then sell.</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="empty"><IconSearch /><p>No products match “{query}”.</p></div>
+          <div className="empty"><IconSearch /><p>{query ? `No products match “${query}”.` : "No products in this category."}</p></div>
         ) : (
           <div className="prod-grid">
             {filtered.map((p) => (
-              <button key={p.id} className="prod-tile" onClick={() => addProduct(p)} disabled={p.stock <= 0}>
+              <button key={p.id} className="prod-tile" onClick={() => add(p)} disabled={p.stock <= 0}>
+                <ProductImage product={p} size={48} />
                 <span className="name">{p.name}</span>
                 <span className="price">{formatMoney(p.price, settings.currencySymbol)}</span>
                 <span className="stockline">
@@ -112,10 +140,10 @@ export function CheckoutPage() {
         onPay={() => { setCartOpen(false); setPayOpen(true); }} />
 
       <PaymentSheet open={payOpen} onClose={() => setPayOpen(false)} shop={settings}
-        onComplete={(sale) => { setPayOpen(false); setReceipt(sale); toast("Sale completed!", "success"); }} />
+        onComplete={(sale) => { setPayOpen(false); setReceiptId(sale.id); toast("Sale completed!", "success"); }} />
 
-      <ReceiptSheet sale={receipt} shop={settings} open={!!receipt}
-        onClose={() => setReceipt(null)} onNewSale={() => setReceipt(null)} />
+      <ReceiptSheet sale={receipt} shop={settings} open={!!receiptId}
+        onClose={() => setReceiptId(null)} onNewSale={() => setReceiptId(null)} />
     </>
   );
 }

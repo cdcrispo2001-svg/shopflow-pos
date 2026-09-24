@@ -51,6 +51,18 @@ class EscPosBuilder {
     return this.raw(GS, 0x56, 0x42, 0x00);
   }
 
+  /** Native QR code (GS ( k), supported by common ESC/POS thermal printers. */
+  qr(data: string, moduleSize = 6) {
+    const bytes = [...new TextEncoder().encode(data)];
+    const len = bytes.length + 3;
+    return this
+      .raw(GS, 0x28, 0x6b, 4, 0, 0x31, 0x41, 0x32, 0x00) // model 2
+      .raw(GS, 0x28, 0x6b, 3, 0, 0x31, 0x43, moduleSize) // module size
+      .raw(GS, 0x28, 0x6b, 3, 0, 0x31, 0x45, 0x31) // error correction M
+      .raw(GS, 0x28, 0x6b, len & 0xff, (len >> 8) & 0xff, 0x31, 0x50, 0x30, ...bytes) // store
+      .raw(GS, 0x28, 0x6b, 3, 0, 0x31, 0x51, 0x30); // print
+  }
+
   build(): Uint8Array {
     return new Uint8Array(this.chunks);
   }
@@ -67,6 +79,38 @@ function row(left: string, right: string, width: number): string {
     return `${left.slice(0, width - right.length - 1)} ${right}`;
   }
   return left + " ".repeat(space) + right;
+}
+
+const METHOD_NAMES: Record<Sale["paymentMethod"], string> = {
+  cash: "Cash",
+  mobile_money: "Mobile Money",
+  card: "Card",
+  credit: "Credit",
+};
+
+/** Paid / change / balance lines, which differ for cash and credit sales. */
+function paymentRows(sale: Sale, sym: string): [string, string][] {
+  const rows: [string, string][] = [["Paid", formatMoney(sale.amountPaid, sym)]];
+  if (sale.paymentMethod === "cash") rows.push(["Change", formatMoney(sale.change, sym)]);
+  if (sale.paymentMethod === "credit" && sale.balanceDue !== undefined) {
+    rows.push(["BALANCE DUE", formatMoney(sale.balanceDue, sym)]);
+  }
+  rows.push(["Method", METHOD_NAMES[sale.paymentMethod]]);
+  return rows;
+}
+
+/** URA EFRIS lines: fiscal document number and verification code, or a pending note. */
+function fiscalRows(sale: Sale): string[] {
+  const efris = sale.efris;
+  if (!efris || efris.status === "cancelled") return [];
+  if (efris.status !== "fiscalised" || !efris.invoiceNo) return ["URA e-receipt: pending"];
+  return [
+    "URA EFRIS e-receipt",
+    ...(efris.sellerTin ? [`TIN: ${efris.sellerTin}`] : []),
+    `FDN: ${efris.invoiceNo}`,
+    ...(efris.antifakeCode ? [`Verification code: ${efris.antifakeCode}`] : []),
+    ...(efris.qrCode ? ["Scan the QR code to verify"] : []),
+  ];
 }
 
 /** Human-readable plain-text receipt (on-screen preview + browser print). */
@@ -87,6 +131,7 @@ export function renderReceiptText(sale: Sale, shop: ShopSettings): string {
   out.push(row(`Receipt: ${sale.receiptNo}`, "", w));
   out.push(new Date(sale.createdAt).toLocaleString());
   if (sale.customerName) out.push(`Customer: ${sale.customerName}`);
+  if (sale.customerPhone) out.push(`Phone: ${sale.customerPhone}`);
   out.push(divider(w));
 
   for (const it of sale.items) {
@@ -107,10 +152,13 @@ export function renderReceiptText(sale: Sale, shop: ShopSettings): string {
     out.push(row("Discount", `-${formatMoney(sale.discount, sym)}`, w));
   out.push(row("TOTAL", formatMoney(sale.total, sym), w));
   out.push(divider(w));
-  out.push(row("Paid", formatMoney(sale.amountPaid, sym), w));
-  out.push(row("Change", formatMoney(sale.change, sym), w));
-  out.push(row("Method", sale.paymentMethod.replace("_", " "), w));
+  for (const [left, right] of paymentRows(sale, sym)) out.push(row(left, right, w));
   out.push(divider(w));
+  const fiscal = fiscalRows(sale);
+  if (fiscal.length) {
+    out.push(...fiscal.map(center));
+    out.push(divider(w));
+  }
   if (shop.receiptFooter) out.push(center(shop.receiptFooter));
   out.push(`Served by: ${sale.cashier || shop.cashierName}`);
   return out.join("\n");
@@ -131,6 +179,7 @@ export function buildReceiptBytes(sale: Sale, shop: ShopSettings): Uint8Array {
   b.line(`Receipt: ${sale.receiptNo}`);
   b.line(new Date(sale.createdAt).toLocaleString());
   if (sale.customerName) b.line(`Customer: ${sale.customerName}`);
+  if (sale.customerPhone) b.line(`Phone: ${sale.customerPhone}`);
   b.line(divider(w));
 
   for (const it of sale.items) {
@@ -147,10 +196,15 @@ export function buildReceiptBytes(sale: Sale, shop: ShopSettings): Uint8Array {
     b.line(row("Discount", `-${formatMoney(sale.discount, sym)}`, w));
   b.bold(true).size(true).line(row("TOTAL", formatMoney(sale.total, sym), w)).size(false).bold(false);
   b.line(divider(w));
-  b.line(row("Paid", formatMoney(sale.amountPaid, sym), w));
-  b.line(row("Change", formatMoney(sale.change, sym), w));
-  b.line(row("Method", sale.paymentMethod.replace("_", " "), w));
+  for (const [left, right] of paymentRows(sale, sym)) b.line(row(left, right, w));
   b.line(divider(w));
+  const fiscal = fiscalRows(sale);
+  if (fiscal.length) {
+    b.align("center");
+    for (const line of fiscal) b.line(line);
+    if (sale.efris?.qrCode) b.qr(sale.efris.qrCode).line();
+    b.align("left").line(divider(w));
+  }
   b.align("center");
   if (shop.receiptFooter) b.line(shop.receiptFooter);
   b.line(`Served by: ${sale.cashier || shop.cashierName}`);

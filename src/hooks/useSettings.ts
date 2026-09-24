@@ -1,7 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, DEFAULT_SETTINGS, ensureSettings } from "@/core/db/database";
 import type { ShopSettings } from "@/core/types/models";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 /** Live shop settings, always returns a usable object (defaults until loaded). */
 export function useSettings(): ShopSettings {
@@ -10,7 +10,9 @@ export function useSettings(): ShopSettings {
   }, []);
   const settings = useLiveQuery(() => db.settings.get("shop"), [], DEFAULT_SETTINGS);
   // Merge over defaults so fields added in newer versions are never undefined.
-  return { ...DEFAULT_SETTINGS, ...(settings ?? {}) };
+  // Memoised so the object only changes when the stored row does — consumers
+  // use it as an effect/memo dependency (a fresh object each render looped).
+  return useMemo(() => ({ ...DEFAULT_SETTINGS, ...(settings ?? {}) }), [settings]);
 }
 
 export async function saveSettings(patch: Partial<ShopSettings>): Promise<void> {

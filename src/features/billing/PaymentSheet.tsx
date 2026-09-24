@@ -5,7 +5,9 @@ import { useToast } from "@/core/components/Toast";
 import { useCart } from "@/store/cartStore";
 import { computeTotals, cartLineToSaleItem } from "@/core/utils/totals";
 import { saleRepo } from "@/features/sales/saleRepo";
-import { formatMoney } from "@/core/utils/format";
+import { useEfrisActive } from "@/features/efris/efrisStore";
+import { PENDING_EFRIS, fiscaliseSale, offlineLimitReached } from "@/features/efris/efrisQueue";
+import { formatMoney, roundMoney } from "@/core/utils/format";
 import { IconWallet, IconCheck } from "@/core/components/icons";
 
 interface Props {
@@ -24,9 +26,13 @@ const METHODS: { id: PaymentMethod; label: string }[] = [
 
 export function PaymentSheet({ open, onClose, shop, onComplete }: Props) {
   const { toast } = useToast();
-  const { lines, discount, customerName, customerPhone, clear } = useCart();
+  const {
+    lines, discount, customerName, customerPhone, customerTin, setCustomerName, setCustomerPhone, clear,
+  } = useCart();
+  const efrisActive = useEfrisActive();
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [tendered, setTendered] = useState("");
+  const [deposit, setDeposit] = useState("");
   const [saving, setSaving] = useState(false);
 
   const totals = useMemo(
@@ -34,8 +40,12 @@ export function PaymentSheet({ open, onClose, shop, onComplete }: Props) {
     [lines, discount, shop],
   );
 
-  const paid = method === "cash" ? Number(tendered || 0) : totals.total;
-  const change = method === "cash" ? Math.max(0, paid - totals.total) : 0;
+  const credit = method === "credit";
+  const paid = method === "cash"
+    ? Number(tendered || 0)
+    : credit ? Math.min(Math.max(Number(deposit || 0), 0), totals.total) : totals.total;
+  const change = method === "cash" ? roundMoney(Math.max(0, paid - totals.total)) : 0;
+  const balanceDue = credit ? roundMoney(totals.total - paid) : 0;
   const quickCash = useMemo(() => {
     const t = totals.total;
     const round = (n: number) => Math.ceil(t / n) * n;
@@ -47,7 +57,17 @@ export function PaymentSheet({ open, onClose, shop, onComplete }: Props) {
     if (method === "cash" && paid < totals.total) {
       return toast("Amount paid is less than the total.", "error");
     }
+    if (credit && !customerName.trim()) {
+      return toast("Enter the customer's name for a credit sale.", "error");
+    }
+    if (customerTin && customerTin.length !== 10) {
+      return toast("Buyer TIN must be 10 digits.", "error");
+    }
     setSaving(true);
+    if (efrisActive && (await offlineLimitReached())) {
+      setSaving(false);
+      return toast("URA offline limit reached. Connect to the internet and send waiting sales (Home) before selling.", "error");
+    }
     const res = await saleRepo.record({
       items: lines.map(cartLineToSaleItem),
       subtotal: totals.subtotal,
@@ -57,17 +77,23 @@ export function PaymentSheet({ open, onClose, shop, onComplete }: Props) {
       costTotal: totals.costTotal,
       profit: totals.profit,
       paymentMethod: method,
-      amountPaid: method === "cash" ? paid : totals.total,
+      amountPaid: paid,
       change,
-      customerName: customerName || undefined,
-      customerPhone: customerPhone || undefined,
+      balanceDue: credit ? balanceDue : undefined,
+      customerName: customerName.trim() || undefined,
+      customerPhone: customerPhone.trim() || undefined,
+      customerTin: efrisActive && customerTin ? customerTin : undefined,
+      efris: efrisActive ? { ...PENDING_EFRIS } : undefined,
       cashier: shop.cashierName,
     });
     setSaving(false);
     if (res.ok) {
       clear();
       setTendered("");
+      setDeposit("");
       onComplete(res.value);
+      // Fiscalise in the background; the receipt updates when URA answers.
+      if (efrisActive) void fiscaliseSale(res.value.id);
     } else {
       toast(res.error.message, "error");
     }
@@ -108,6 +134,37 @@ export function PaymentSheet({ open, onClose, shop, onComplete }: Props) {
           <div className="between mt-16">
             <span className="muted">Change</span>
             <span className="bold" style={{ fontSize: 20 }}>{formatMoney(change, shop.currencySymbol)}</span>
+          </div>
+        </>
+      )}
+
+      {credit && (
+        <>
+          <p className="small muted mt-16">
+            The customer takes the goods now and pays later. Record repayments from the Sales tab.
+          </p>
+          <div className="field-row mt-8">
+            <div className="field">
+              <label>Customer name *</label>
+              <input className="input" value={customerName} placeholder="Who owes this?"
+                onChange={(e) => setCustomerName(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Phone</label>
+              <input className="input" type="tel" inputMode="tel" value={customerPhone} placeholder="07…"
+                onChange={(e) => setCustomerPhone(e.target.value)} />
+            </div>
+          </div>
+          <div className="field">
+            <label>Deposit paid now (optional)</label>
+            <input className="input" type="number" inputMode="decimal" value={deposit}
+              placeholder="0" onChange={(e) => setDeposit(e.target.value)} />
+          </div>
+          <div className="between">
+            <span className="muted">Balance owed</span>
+            <span className="bold" style={{ fontSize: 20, color: "var(--accent)" }}>
+              {formatMoney(balanceDue, shop.currencySymbol)}
+            </span>
           </div>
         </>
       )}

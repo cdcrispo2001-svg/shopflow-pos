@@ -28,6 +28,8 @@ jobs:
       - run: npm ci
       - name: Type-check
         run: npm run typecheck
+      - name: Unit tests
+        run: npm test
       - name: Build (project base path)
         run: npm run build
         env:

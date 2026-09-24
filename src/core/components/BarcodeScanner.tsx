@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 import { IconClose } from "@/core/components/icons";
 
 interface Props {
@@ -12,24 +11,31 @@ export function BarcodeScanner({ onDetected, onClose }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState<string | null>(null);
   const lastRef = useRef<{ code: string; at: number }>({ code: "", at: 0 });
+  // Latest callback without restarting the camera when the parent re-renders.
+  const onDetectedRef = useRef(onDetected);
+  onDetectedRef.current = onDetected;
 
   useEffect(() => {
-    const reader = new BrowserMultiFormatReader();
     let controls: { stop: () => void } | null = null;
     let cancelled = false;
 
-    reader
-      .decodeFromVideoDevice(undefined, videoRef.current!, (result) => {
-        if (!result) return;
-        const code = result.getText();
-        const now = Date.now();
-        // debounce repeated reads of the same barcode
-        if (code === lastRef.current.code && now - lastRef.current.at < 1500) return;
-        lastRef.current = { code, at: now };
-        if (navigator.vibrate) navigator.vibrate(60);
-        onDetected(code);
+    // ZXing is large, so it is only downloaded once a scanner is opened.
+    import("@zxing/browser")
+      .then(({ BrowserMultiFormatReader }) => {
+        if (cancelled || !videoRef.current) return null;
+        return new BrowserMultiFormatReader().decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+          if (!result) return;
+          const code = result.getText();
+          const now = Date.now();
+          // debounce repeated reads of the same barcode
+          if (code === lastRef.current.code && now - lastRef.current.at < 1500) return;
+          lastRef.current = { code, at: now };
+          if (navigator.vibrate) navigator.vibrate(60);
+          onDetectedRef.current(code);
+        });
       })
       .then((c) => {
+        if (!c) return;
         if (cancelled) c.stop();
         else controls = c;
       })
@@ -45,7 +51,7 @@ export function BarcodeScanner({ onDetected, onClose }: Props) {
       cancelled = true;
       controls?.stop();
     };
-  }, [onDetected]);
+  }, []);
 
   return (
     <div>

@@ -59,7 +59,7 @@ export function dailyTrend(sales: Sale[], days = 7): DayPoint[] {
   return out;
 }
 
-export interface TopProduct { name: string; qty: number; revenue: number; }
+export interface TopProduct { productId: string; name: string; qty: number; revenue: number; }
 
 export function topProducts(sales: Sale[], days = 30, limit = 5): TopProduct[] {
   const from = subDays(new Date(), days).getTime();
@@ -67,7 +67,7 @@ export function topProducts(sales: Sale[], days = 30, limit = 5): TopProduct[] {
   for (const s of completed(sales)) {
     if (!isAfter(s.createdAt, from)) continue;
     for (const it of s.items) {
-      const cur = map.get(it.productId) ?? { name: it.name, qty: 0, revenue: 0 };
+      const cur = map.get(it.productId) ?? { productId: it.productId, name: it.name, qty: 0, revenue: 0 };
       cur.qty += it.qty;
       cur.revenue += it.lineTotal;
       map.set(it.productId, cur);
@@ -76,18 +76,42 @@ export function topProducts(sales: Sale[], days = 30, limit = 5): TopProduct[] {
   return [...map.values()].sort((a, b) => b.qty - a.qty).slice(0, limit);
 }
 
-export interface PaymentSplit { method: string; amount: number; }
+export interface PaymentSplit { method: string; amount: number; count: number; }
+
+const METHOD_LABELS: Record<string, string> = {
+  cash: "Cash",
+  mobile_money: "Mobile Money",
+  card: "Card",
+  credit: "Credit",
+};
+
+export function paymentMethodLabel(method: string): string {
+  return METHOD_LABELS[method] ?? method.replace("_", " ");
+}
 
 export function paymentBreakdown(sales: Sale[], from: number, to: number): PaymentSplit[] {
-  const map = new Map<string, number>();
+  const map = new Map<string, PaymentSplit>();
   for (const s of completed(sales)) {
     if (s.createdAt < from || s.createdAt > to) continue;
-    map.set(s.paymentMethod, (map.get(s.paymentMethod) ?? 0) + s.total);
+    const cur = map.get(s.paymentMethod) ?? { method: paymentMethodLabel(s.paymentMethod), amount: 0, count: 0 };
+    cur.amount += s.total;
+    cur.count += 1;
+    map.set(s.paymentMethod, cur);
   }
-  return [...map.entries()].map(([method, amount]) => ({
-    method: method.replace("_", " "),
-    amount,
-  }));
+  return [...map.values()].sort((a, b) => b.amount - a.amount);
+}
+
+export interface CreditSummary { amount: number; receipts: number; customers: number; }
+
+/** Money customers still owe on completed credit sales. */
+export function outstandingCredit(sales: Sale[]): CreditSummary {
+  const owing = completed(sales).filter((s) => (s.balanceDue ?? 0) > 0);
+  const customers = new Set(owing.map((s) => (s.customerName ?? "").trim().toLowerCase()));
+  return {
+    amount: owing.reduce((n, s) => n + (s.balanceDue ?? 0), 0),
+    receipts: owing.length,
+    customers: customers.size,
+  };
 }
 
 export function lowStockProducts(products: Product[]): Product[] {

@@ -9,6 +9,7 @@ export interface CartLine {
     price: number;
     cost: number;
     taxRate: number;
+    stock?: number; // on-hand qty when added — caps the cart; the sale re-checks
   };
   qty: number;
 }

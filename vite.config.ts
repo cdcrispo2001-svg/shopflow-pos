@@ -1,6 +1,8 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 // Base path is "/" for local dev and the Capacitor APK (assets served from
@@ -8,8 +10,17 @@ import path from "node:path";
 // The Pages workflow sets VITE_BASE; everything else defaults to "/".
 const base = process.env.VITE_BASE ?? "/";
 
+const { version } = JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "utf8")) as { version: string };
+
 export default defineConfig({
   base,
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+  },
+  test: {
+    include: ["tests/**/*.test.ts"],
+    setupFiles: ["tests/setup.ts"],
+  },
   resolve: {
     alias: { "@": path.resolve(__dirname, "src") },
   },

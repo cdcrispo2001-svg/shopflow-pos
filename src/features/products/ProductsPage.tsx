@@ -4,6 +4,7 @@ import { db } from "@/core/db/database";
 import type { Product } from "@/core/types/models";
 import { Topbar } from "@/core/components/AppShell";
 import { ProductForm } from "@/features/products/ProductForm";
+import { ProductImage } from "@/core/components/ProductImage";
 import { Sheet } from "@/core/components/Sheet";
 import { BarcodeScanner } from "@/core/components/BarcodeScanner";
 import { useSettings } from "@/hooks/useSettings";
@@ -37,7 +38,7 @@ export function ProductsPage() {
     );
   }, [products, query]);
 
-  const lowStock = products.filter((p) => p.stock <= p.lowStockAt).length;
+  const lowStock = products.filter((p) => p.active && p.stock <= p.lowStockAt).length;
 
   function openNew(barcode?: string) {
     setEditing(null);
@@ -100,9 +101,9 @@ export function ProductsPage() {
           filtered.map((p) => (
             <button key={p.id} className="list-item full" style={{ textAlign: "left" }}
               onClick={() => { setEditing(p); setPrefill(undefined); setFormOpen(true); }}>
-              <div className="thumb">{p.name.slice(0, 2).toUpperCase()}</div>
+              <ProductImage product={p} />
               <div className="grow col">
-                <span className="bold">{p.name}</span>
+                <span className="bold">{p.name}{!p.active && <span className="pill" style={{ marginLeft: 6 }}>Inactive</span>}</span>
                 <span className="small muted">
                   {formatMoney(p.price, settings.currencySymbol)}
                   {p.category ? ` · ${p.category}` : ""}

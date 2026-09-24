@@ -1,5 +1,6 @@
 import { db } from "@/core/db/database";
-import type { Product } from "@/core/types/models";
+import type { Product, ProductEfris } from "@/core/types/models";
+import { isValidPhoto } from "@/core/utils/imageFile";
 import { type Result, attempt } from "@/core/types/result";
 import { newId } from "@/core/utils/format";
 
@@ -32,6 +33,29 @@ function validateProductInput(input: Partial<ProductInput>): void {
     }
   }
   if ("taxRate" in input) validateNumber(input.taxRate as number, "Tax rate", 0, 100);
+  if (input.imageKey !== undefined && (typeof input.imageKey !== "string" || input.imageKey.length > 64)) {
+    throw new Error("Product picture is invalid.");
+  }
+  if (input.photo !== undefined && (typeof input.photo !== "string" || !isValidPhoto(input.photo))) {
+    throw new Error("Product photo is invalid or too large.");
+  }
+  if (input.efris !== undefined) validateProductEfris(input.efris);
+}
+
+function validateProductEfris(efris: ProductEfris): void {
+  const text = (value: unknown, label: string, pattern: RegExp) => {
+    if (value === undefined || value === "") return;
+    if (typeof value !== "string" || !pattern.test(value)) throw new Error(`${label} is invalid.`);
+  };
+  text(efris.goodsCode, "URA goods code", /^[\w .\-/]{1,50}$/);
+  text(efris.commodityCode, "URA commodity code", /^\d{4,18}$/);
+  text(efris.unitCode, "URA unit code", /^[\w-]{1,10}$/);
+  if (efris.taxCategory !== undefined && !["01", "02", "03"].includes(efris.taxCategory)) {
+    throw new Error("URA tax category is invalid.");
+  }
+  if (efris.registeredAt !== undefined && !Number.isSafeInteger(efris.registeredAt)) {
+    throw new Error("URA registration date is invalid.");
+  }
 }
 
 export const productRepo = {

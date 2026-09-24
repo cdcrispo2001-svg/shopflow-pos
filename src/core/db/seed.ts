@@ -1,6 +1,7 @@
 import { db } from "@/core/db/database";
 import type { Product } from "@/core/types/models";
 import { newId } from "@/core/utils/format";
+import { matchProductImage } from "@/core/catalog/productImages";
 
 // One-tap sample catalogue so a new user can explore checkout & reports
 // immediately. Never runs automatically.
@@ -20,6 +21,7 @@ export async function seedSampleProducts(): Promise<number> {
   const now = Date.now();
   const rows: Product[] = SAMPLE.map((p, i) => ({
     ...p,
+    imageKey: matchProductImage(p.name, p.category)?.key,
     id: newId("p_"),
     createdAt: now + i,
     updatedAt: now + i,

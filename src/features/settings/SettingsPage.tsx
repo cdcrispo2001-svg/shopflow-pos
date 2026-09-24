@@ -11,6 +11,8 @@ import {
 } from "@/core/utils/backup";
 import { runAutoBackup } from "@/core/utils/autoBackup";
 import { isNative, platformName } from "@/core/utils/platform";
+import { COUNTRIES, isUganda } from "@/core/utils/country";
+import { EfrisSettings } from "@/features/efris/EfrisSettings";
 import { formatDistanceToNow } from "date-fns";
 import {
   IconBluetooth, IconBackup, IconMail, IconRestore, IconCheck,
@@ -117,6 +119,12 @@ export function SettingsPage() {
               placeholder="you@example.com" onChange={(e) => set("email", e.target.value)} />
           </div>
           <div className="field">
+            <label>Country</label>
+            <select className="select" value={draft.country} onChange={(e) => set("country", e.target.value)}>
+              {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="field">
             <label>Receipt footer</label>
             <textarea className="input" rows={2} value={draft.receiptFooter}
               onChange={(e) => set("receiptFooter", e.target.value)} />
@@ -152,6 +160,14 @@ export function SettingsPage() {
             </label>
           </div>
         </Row>
+
+        {/* URA EFRIS — Uganda only */}
+        {isUganda(settings.country) && (
+          <>
+            <div className="section-title">URA EFRIS e-receipts</div>
+            <EfrisSettings />
+          </>
+        )}
 
         {/* Printer */}
         <div className="section-title">Thermal printer</div>
@@ -220,6 +236,11 @@ export function SettingsPage() {
             <IconRestore /> Restore from backup file
           </button>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={onRestoreFile} />
+          <div className="field mt-16" style={{ marginBottom: 0 }}>
+            <label>Remind me to back up every (days, 0 = off)</label>
+            <input className="input" type="number" inputMode="numeric" min={0} value={draft.backupReminderDays}
+              onChange={(e) => set("backupReminderDays", Math.max(0, Math.floor(Number(e.target.value || 0))))} />
+          </div>
         </Row>
 
         {/* Automatic backups */}
@@ -289,7 +310,10 @@ export function SettingsPage() {
         </Row>
 
         <p className="center dim small mt-24">
-          ShopFlow POS · v1.0 · offline-first · {platformName()}
+          ShopFlow POS · v{__APP_VERSION__} · offline-first · {platformName()}
+        </p>
+        <p className="center dim small mt-8">
+          Product pictures: Twemoji by Twitter, Inc and contributors, licensed CC-BY 4.0.
         </p>
       </div>
     </>

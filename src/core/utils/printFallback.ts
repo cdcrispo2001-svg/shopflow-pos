@@ -1,5 +1,6 @@
 import type { Sale, ShopSettings } from "@/core/types/models";
 import { renderReceiptText } from "@/core/utils/escpos";
+import { qrDataUrl } from "@/core/utils/qr";
 
 // Browser-print fallback for devices without Web Bluetooth (e.g. iOS) or when
 // no thermal printer is paired. Opens a print dialog with a monospaced,
@@ -24,6 +25,13 @@ export function printReceiptInBrowser(sale: Sale, shop: ShopSettings) {
   receipt.textContent = text;
   doc.head.replaceChildren(meta, style);
   doc.body.replaceChildren(receipt);
+  if (sale.efris?.qrCode) {
+    const qr = doc.createElement("img");
+    qr.src = qrDataUrl(sale.efris.qrCode, 3);
+    qr.alt = "URA verification QR code";
+    qr.style.cssText = "display:block;margin:6px auto;width:140px;height:140px;image-rendering:pixelated";
+    doc.body.append(qr);
+  }
   win.focus();
   setTimeout(() => {
     win.print();

@@ -6,9 +6,11 @@ import { ProductsPage } from "@/features/products/ProductsPage";
 import { SalesPage } from "@/features/sales/SalesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { useAutoBackup } from "@/hooks/useAutoBackup";
+import { useEfrisSync } from "@/features/efris/useEfrisSync";
 
 export default function App() {
   useAutoBackup();
+  useEfrisSync();
   return (
     <AppShell>
       <Routes>

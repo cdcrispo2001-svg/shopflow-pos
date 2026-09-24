@@ -1,7 +1,7 @@
 import { db } from "@/core/db/database";
-import type { Product, Sale } from "@/core/types/models";
+import type { Product, Sale, SalePayment } from "@/core/types/models";
 import { type Result, attempt } from "@/core/types/result";
-import { newId } from "@/core/utils/format";
+import { newId, roundMoney } from "@/core/utils/format";
 import type { SaleDraft } from "@/core/utils/totals";
 
 function assertFiniteNumber(value: number, label: string): void {
@@ -82,12 +82,37 @@ function validateDraftMoney(draft: SaleDraft): void {
   if (!closeEnough(draft.profit, draft.subtotal - draft.costTotal - draft.discount)) {
     throw new Error("Sale profit is inconsistent.");
   }
+  if (draft.efris !== undefined) {
+    const { status, attempts, ...rest } = draft.efris;
+    if (status !== "pending" || attempts !== 0 || Object.keys(rest).length > 0) {
+      throw new Error("A new sale can only start as waiting for URA.");
+    }
+  }
+  if (draft.customerTin !== undefined && !/^\d{10}$/.test(draft.customerTin)) {
+    throw new Error("Customer TIN must be 10 digits.");
+  }
+
+  const balanceDue = draft.balanceDue ?? 0;
+  assertFiniteNumber(balanceDue, "Balance due");
+  if (balanceDue < 0) throw new Error("Balance due must not be negative.");
+  if (draft.payments?.length) throw new Error("A new sale cannot carry repayments.");
+
   if (draft.paymentMethod === "cash") {
     if (draft.amountPaid < draft.total) throw new Error("Cash received is less than the sale total.");
     if (!closeEnough(draft.change, draft.amountPaid - draft.total)) {
       throw new Error("Cash change is inconsistent.");
     }
-  } else if (!closeEnough(draft.amountPaid, draft.total) || !closeEnough(draft.change, 0)) {
+    if (balanceDue > 0) throw new Error("A cash sale cannot leave a balance.");
+  } else if (draft.paymentMethod === "credit") {
+    if (!draft.customerName?.trim()) throw new Error("Credit sales need a customer name.");
+    if (draft.amountPaid > draft.total) throw new Error("Deposit exceeds the sale total.");
+    if (!closeEnough(draft.change, 0)) throw new Error("Credit sales give no change.");
+    if (!closeEnough(balanceDue, draft.total - draft.amountPaid)) {
+      throw new Error("Credit balance is inconsistent.");
+    }
+  } else if (
+    !closeEnough(draft.amountPaid, draft.total) || !closeEnough(draft.change, 0) || balanceDue > 0
+  ) {
     throw new Error("Non-cash payment amounts are inconsistent.");
   }
 }
@@ -125,8 +150,11 @@ export const saleRepo = {
         }
 
         const existingSales = await db.sales.toArray();
+        const credit = draft.paymentMethod === "credit";
         const sale: Sale = {
           ...draft,
+          balanceDue: credit ? roundMoney(draft.balanceDue ?? 0) : undefined,
+          payments: credit ? [] : undefined,
           id: newId("s_"),
           receiptNo: nextReceiptNumber(existingSales),
           status: "completed",
@@ -176,8 +204,52 @@ export const saleRepo = {
           if (!Number.isFinite(stock)) throw new Error(`Restocked quantity for ${product.name} is too large.`);
           await db.products.update(productId, { stock, updatedAt: now });
         }
-        await db.sales.update(id, { status: mode });
+        // A sale URA never received needs no credit note; stop it being sent.
+        const efris = sale.efris && sale.efris.status !== "fiscalised"
+          ? { ...sale.efris, status: "cancelled" as const }
+          : sale.efris;
+        await db.sales.update(id, { status: mode, efris });
       });
     }, "Cancelling sale");
+  },
+
+  /** Records a repayment against a credit sale and reduces its balance. */
+  async recordPayment(
+    id: string,
+    amount: number,
+    method: SalePayment["method"],
+  ): Promise<Result<Sale>> {
+    return attempt(async () => {
+      assertFiniteNumber(amount, "Payment amount");
+      if (amount <= 0) throw new Error("Payment amount must be greater than 0.");
+      if (!["cash", "mobile_money", "card"].includes(method)) {
+        throw new Error("Payment method is invalid.");
+      }
+
+      return db.transaction("rw", db.sales, async () => {
+        const sale = await db.sales.get(id);
+        if (!sale) throw new Error("Sale not found.");
+        if (sale.status !== "completed") throw new Error(`Receipt ${sale.receiptNo} was ${sale.status}.`);
+        const balance = sale.balanceDue ?? 0;
+        if (sale.paymentMethod !== "credit" || balance <= 0) {
+          throw new Error(`Receipt ${sale.receiptNo} has nothing owing.`);
+        }
+        if (amount > balance + 0.011) throw new Error("Payment is more than the balance owed.");
+
+        const paid = Math.min(amount, balance);
+        const remaining = roundMoney(balance - paid);
+        const updated: Sale = {
+          ...sale,
+          amountPaid: roundMoney(sale.amountPaid + paid),
+          balanceDue: remaining < 0.011 ? 0 : remaining,
+          payments: [
+            ...(sale.payments ?? []),
+            { id: newId("pay_"), amount: roundMoney(paid), method, createdAt: Date.now() },
+          ],
+        };
+        await db.sales.put(updated);
+        return updated;
+      });
+    }, "Recording payment");
   },
 };

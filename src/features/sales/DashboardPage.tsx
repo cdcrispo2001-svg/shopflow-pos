@@ -6,14 +6,17 @@ import {
 } from "recharts";
 import { db } from "@/core/db/database";
 import { Topbar } from "@/core/components/AppShell";
+import { ProductImage } from "@/core/components/ProductImage";
+import { EfrisStatusBanner } from "@/features/efris/EfrisStatusBanner";
 import { useSettings } from "@/hooks/useSettings";
 import { formatMoney, formatNumber } from "@/core/utils/format";
 import {
   todayMetrics, metricsBetween, dailyTrend, topProducts, lowStockProducts, inventoryValue,
+  paymentBreakdown, outstandingCredit,
 } from "@/features/sales/reports";
-import { subDays, startOfDay, endOfDay } from "date-fns";
+import { subDays, startOfDay, endOfDay, formatDistanceToNow } from "date-fns";
 import {
-  IconTrend, IconWallet, IconReceipt, IconAlert, IconCart, IconBox, IconTag,
+  IconTrend, IconWallet, IconReceipt, IconCart, IconBox, IconTag, IconBackup,
 } from "@/core/components/icons";
 
 type Range = 7 | 30;
@@ -27,14 +30,27 @@ export function DashboardPage() {
 
   const sym = settings.currencySymbol;
   const today = useMemo(() => todayMetrics(sales), [sales]);
-  const period = useMemo(() => {
+  const { period, payments } = useMemo(() => {
     const from = startOfDay(subDays(new Date(), range - 1)).getTime();
     const to = endOfDay(new Date()).getTime();
-    return metricsBetween(sales, from, to);
+    return { period: metricsBetween(sales, from, to), payments: paymentBreakdown(sales, from, to) };
   }, [sales, range]);
+  const credit = useMemo(() => outstandingCredit(sales), [sales]);
+
+  // Nudge to back up once the last backup is older than the reminder window.
+  const backupNudge = useMemo(() => {
+    const days = settings.backupReminderDays;
+    if (!days || (sales.length === 0 && products.length === 0)) return null;
+    const last = settings.lastBackupAt;
+    if (!last) return "You haven't backed up your shop data yet.";
+    if (Date.now() - last < days * 86_400_000) return null;
+    return `Last backup was ${formatDistanceToNow(last, { addSuffix: true })}.`;
+  }, [settings.backupReminderDays, settings.lastBackupAt, sales.length, products.length]);
+  const paymentMax = Math.max(1, ...payments.map((p) => p.amount));
   const trend = useMemo(() => dailyTrend(sales, range), [sales, range]);
   const top = useMemo(() => topProducts(sales, range), [sales, range]);
   const lowStock = useMemo(() => lowStockProducts(products), [products]);
+  const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const stockValue = useMemo(() => inventoryValue(products), [products]);
 
   const maxTrend = Math.max(1, ...trend.map((t) => t.revenue));
@@ -43,6 +59,20 @@ export function DashboardPage() {
     <>
       <Topbar title={settings.name || "Dashboard"} subtitle="Live business overview" />
       <div className="page">
+        <EfrisStatusBanner />
+        {backupNudge && (
+          <div className="list-item" style={{ borderColor: "rgba(245,158,11,0.4)" }}>
+            <div className="thumb" style={{ background: "rgba(245,158,11,0.16)", color: "#fcd34d" }}>
+              <IconBackup width={18} height={18} />
+            </div>
+            <div className="grow col">
+              <span className="bold">Back up your data</span>
+              <span className="small muted">{backupNudge}</span>
+            </div>
+            <button className="btn btn-accent btn-sm" onClick={() => navigate("/settings")}>Back up</button>
+          </div>
+        )}
+
         {/* Today headline */}
         <div className="stat-grid">
           <div className="stat accent">
@@ -84,7 +114,7 @@ export function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#26365a" vertical={false} />
                 <XAxis dataKey="day" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} width={36}
-                  tickFormatter={(v) => { const n = Number(v); return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`; }} domain={[0, maxTrend]} />
+                  tickFormatter={(v) => { const n = Number(v); return n >= 1000 ? `${Number((n / 1000).toFixed(1))}k` : `${n}`; }} domain={[0, maxTrend]} />
                 <Tooltip
                   contentStyle={{ background: "#16213a", border: "1px solid #2b3a5c", borderRadius: 10, color: "#e8eefb", fontSize: 12 }}
                   formatter={(v) => formatMoney(Number(v), sym)} />
@@ -115,15 +145,48 @@ export function DashboardPage() {
           </div>
         </div>
 
+        {/* Money owed on credit sales */}
+        {credit.amount > 0 && (
+          <button className="list-item full mt-16" style={{ textAlign: "left" }}
+            onClick={() => navigate("/sales?view=credit")}>
+            <div className="thumb" style={{ background: "rgba(245,158,11,0.16)", color: "#fcd34d" }}>
+              <IconWallet width={18} height={18} />
+            </div>
+            <div className="grow col">
+              <span className="bold">Owed by customers</span>
+              <span className="small muted">{credit.receipts} unpaid credit sale(s) · {credit.customers} customer(s)</span>
+            </div>
+            <span className="bold" style={{ color: "var(--accent)" }}>{formatMoney(credit.amount, sym)}</span>
+          </button>
+        )}
+
+        {/* How customers paid */}
+        {payments.length > 0 && (
+          <>
+            <div className="section-title">Payment methods ({range}d)</div>
+            <div className="card-flat" style={{ padding: 14 }}>
+              {payments.map((p, i) => (
+                <div key={p.method} className={i ? "mt-16" : undefined}>
+                  <div className="between small">
+                    <span>{p.method} <span className="dim">· {p.count} sale(s)</span></span>
+                    <span className="bold">{formatMoney(p.amount, sym)}</span>
+                  </div>
+                  <div className="bar-track mt-8">
+                    <div className="bar-fill" style={{ width: `${(p.amount / paymentMax) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
         {/* Low stock */}
         {lowStock.length > 0 && (
           <>
             <div className="section-title">Restock alerts</div>
             {lowStock.slice(0, 5).map((p) => (
               <div key={p.id} className="list-item" onClick={() => navigate("/products")} role="button">
-                <div className="thumb" style={{ background: "var(--danger-soft)", color: "#fca5a5" }}>
-                  <IconAlert width={18} height={18} />
-                </div>
+                <ProductImage product={p} size={44} />
                 <div className="grow col">
                   <span className="bold">{p.name}</span>
                   <span className="small muted">Reorder level: {p.lowStockAt}</span>
@@ -140,10 +203,10 @@ export function DashboardPage() {
           <div className="empty"><IconTag /><p>No sales yet. Make a sale to see insights.</p></div>
         ) : (
           top.map((t, i) => (
-            <div key={t.name} className="list-item">
-              <div className="thumb">#{i + 1}</div>
+            <div key={t.productId} className="list-item">
+              <ProductImage product={productsById.get(t.productId) ?? { name: t.name }} size={44} />
               <div className="grow col">
-                <span className="bold">{t.name}</span>
+                <span className="bold">#{i + 1} {t.name}</span>
                 <span className="small muted">{t.qty} sold</span>
               </div>
               <span className="bold">{formatMoney(t.revenue, sym)}</span>

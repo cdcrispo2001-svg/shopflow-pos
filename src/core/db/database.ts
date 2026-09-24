@@ -1,14 +1,23 @@
 import Dexie, { type Table } from "dexie";
 import type { Product, Sale, ShopSettings } from "@/core/types/models";
+import { detectCountry } from "@/core/utils/country";
+import { matchProductImage } from "@/core/catalog/productImages";
 
 // IndexedDB persistence via Dexie — the offline-first store (Hive analogue).
 // All data lives on-device; nothing leaves the browser unless the user
 // explicitly exports/emails a backup.
 
+/** Key-value rows for URA EFRIS (credentials, session, dictionary). Never backed up. */
+export interface EfrisRow {
+  key: string;
+  value: unknown;
+}
+
 class ShopFlowDB extends Dexie {
   products!: Table<Product, string>;
   sales!: Table<Sale, string>;
   settings!: Table<ShopSettings, string>;
+  efris!: Table<EfrisRow, string>;
 
   constructor() {
     super("shopflow-pos");
@@ -18,6 +27,16 @@ class ShopFlowDB extends Dexie {
       sales: "id, receiptNo, createdAt, status, paymentMethod",
       settings: "id",
     });
+    this.version(2).stores({ efris: "key" });
+    // Give products saved before pictures existed the picture their name matches.
+    this.version(3).stores({}).upgrade((tx) =>
+      tx.table<Product, string>("products").toCollection().modify((product) => {
+        if (product.imageKey === undefined && !product.photo) {
+          const image = matchProductImage(product.name, product.category);
+          if (image) product.imageKey = image.key;
+        }
+      }),
+    );
   }
 }
 
@@ -26,6 +45,7 @@ export const db = new ShopFlowDB();
 export const DEFAULT_SETTINGS: ShopSettings = {
   id: "shop",
   name: "My Shop",
+  country: detectCountry(),
   tagline: "Thank you for your business",
   address: "",
   phone: "",
