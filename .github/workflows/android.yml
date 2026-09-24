@@ -61,7 +61,7 @@ jobs:
         env:
           SIGNING_KEY_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           SHOPFLOW_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          SHOPFLOW_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SHOPFLOW_KEY_ALIAS: shopflow # not secret; as a secret it masked "shopflow" in every log line
           SHOPFLOW_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           export SHOPFLOW_KEYSTORE="$RUNNER_TEMP/shopflow-release.p12"
@@ -78,10 +78,13 @@ jobs:
           ./gradlew assembleDebug --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk ../shopflow-pos.apk
 
-      - name: Show APK signing certificate
+      # Fails the build if the APK is not validly signed; the SHA-256 printed here
+      # must match the permanent key (see the release notes below).
+      - name: Verify APK signature
         run: |
-          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
-          "$apksigner" verify --print-certs shopflow-pos.apk | grep -E "Signer #1 certificate (DN|SHA-256)"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)"
+          echo "Using $apksigner"
+          "$apksigner" verify --verbose --print-certs shopflow-pos.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
